@@ -65,12 +65,24 @@ fun RainTodayApp(viewModel: MainViewModel) {
             TopAppBar(
                 title = {
                     Column {
+                        val current = state.place
                         Text(
-                            text = state.place?.name ?: "Rain Today Lite",
+                            text = when {
+                                current == null -> "Rain Today Lite"
+                                current.isGps -> "Ma position"
+                                else -> current.name
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        val subtitle = state.place?.label.orEmpty()
+                        val subtitle = if (current?.isGps == true) {
+                            listOf(
+                                if (current.hasCoordinates) current.name else "position du téléphone",
+                                current.areaId.orEmpty(),
+                            ).filter { it.isNotBlank() }.joinToString(" · ")
+                        } else {
+                            current?.label.orEmpty()
+                        }
                         if (subtitle.isNotBlank()) {
                             Text(
                                 text = subtitle,

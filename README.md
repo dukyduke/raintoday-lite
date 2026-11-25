@@ -9,13 +9,16 @@ aux services Google Play (localisation via `LocationManager`).
 
 ## Fonctionnalités
 
-- Graphe de prévision minute par minute (bande min/max, courbe moyenne, repère
-  « maintenant »), statut en une phrase (« Il pleut », « Pluie dans 12 min »,
-  « Pas de pluie ») et niveau d'intensité.
-- **Position GPS courante** : bouton « Utiliser ma position », nom du lieu obtenu
-  par géocodage inverse du backend. La dernière position connue sert tout de suite
-  (affichage en ~1 s), une position fraîche la remplace ensuite si elle a bougé de
-  plus de 250 m ; réseau et GPS sont interrogés en parallèle, borne de 7 s.
+- Graphe de prévision minute par minute : bande min/max, courbe moyenne, axe
+  horizontal gradué toutes les 15 min (heure locale), axe vertical annoté
+  « faible / modérée / forte » (seuil de pluie à 25 % de l'échelle du service),
+  repère « maintenant HH:mm » avec zone passée grisée. Statut en une phrase
+  (« Il pleut », « Pluie dans 12 min », « Pas de pluie ») et niveau d'intensité.
+- **« Ma position »** : entrée permanente de la liste des lieux, résolue à chaque
+  rafraîchissement (dernière position connue si < 10 min, sinon fix borné à 7 s ;
+  réseau et GPS interrogés en parallèle). Le nom et la zone UWZ ne sont recalculés
+  que si le point a bougé de plus de 250 m. Sélectionnable comme n'importe quel
+  lieu, y compris pour les alertes — le worker réactualise alors la position.
 - **Tirer vers le bas** sur l'écran pluie pour rafraîchir manuellement.
 - **Lieux favoris** : recherche par nom (résultats du service Meteogroup),
   sélection courante, suppression.

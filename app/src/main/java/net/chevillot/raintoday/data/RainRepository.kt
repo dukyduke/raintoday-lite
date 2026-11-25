@@ -23,7 +23,7 @@ class RainRepository(
         val near = nearDeferred.await()
         val areaId = areaDeferred.await()
         Place(
-            id = SettingsRepository.GPS_ID,
+            id = GPS_ID,
             name = near?.name?.takeIf { it.isNotBlank() } ?: "Ma position",
             region = near?.region.orEmpty(),
             country = near?.country.orEmpty(),
@@ -31,6 +31,7 @@ class RainRepository(
             lon = lon,
             areaId = areaId,
             isGps = true,
+            updatedAt = System.currentTimeMillis(),
         )
     }
 }

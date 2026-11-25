@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import net.chevillot.raintoday.UiState
 import net.chevillot.raintoday.data.AlertRule
 import net.chevillot.raintoday.data.Place
+import net.chevillot.raintoday.data.allPlaces
 import net.chevillot.raintoday.domain.DAY_LETTERS
 import net.chevillot.raintoday.domain.daysLabel
 import net.chevillot.raintoday.work.AlertScheduler
@@ -82,10 +83,7 @@ fun AlertsScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted -> notificationsGranted = granted }
 
-    val places = buildList {
-        state.settings.gps?.let { add(it) }
-        addAll(state.settings.favourites)
-    }
+    val places = state.settings.allPlaces()
 
     Scaffold(
         floatingActionButton = {
@@ -189,7 +187,11 @@ fun AlertsScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                place?.name ?: "Lieu supprimé",
+                                when {
+                                    place == null -> "Lieu supprimé"
+                                    place.isGps -> "Ma position"
+                                    else -> place.name
+                                },
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                             Text(
@@ -256,12 +258,19 @@ private fun AlertRuleDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box {
                     OutlinedButton(onClick = { placeMenu = true }) {
-                        Text(places.firstOrNull { it.id == placeId }?.name ?: "Choisir un lieu")
+                        val chosen = places.firstOrNull { it.id == placeId }
+                        Text(
+                            when {
+                                chosen == null -> "Choisir un lieu"
+                                chosen.isGps -> "Ma position"
+                                else -> chosen.name
+                            }
+                        )
                     }
                     DropdownMenu(expanded = placeMenu, onDismissRequest = { placeMenu = false }) {
                         places.forEach { place ->
                             DropdownMenuItem(
-                                text = { Text(place.name) },
+                                text = { Text(if (place.isGps) "Ma position" else place.name) },
                                 onClick = {
                                     placeId = place.id
                                     placeMenu = false

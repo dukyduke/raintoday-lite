@@ -6,6 +6,9 @@ import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
+/** Identifiant du lieu virtuel « Ma position », toujours résolu à la demande. */
+const val GPS_ID = "__gps__"
+
 /** Un lieu suivi : soit la position GPS (isGps = true), soit un lieu recherché. */
 @Serializable
 data class Place(
@@ -18,6 +21,8 @@ data class Place(
     /** Zone UWZ renvoyée par le service (ex. UWZFR5196), mise en cache. */
     val areaId: String? = null,
     val isGps: Boolean = false,
+    /** Horodatage de la dernière résolution (fix GPS ou recherche). */
+    val updatedAt: Long = 0L,
 ) {
     val label: String
         get() = when {
@@ -25,6 +30,9 @@ data class Place(
             region.isBlank() || region.equals(country, true) -> country
             else -> "$region, $country"
         }
+
+    /** Un lieu GPS jamais résolu n'a pas encore de coordonnées. */
+    val hasCoordinates: Boolean get() = lat != 0.0 || lon != 0.0
 }
 
 /**
@@ -51,6 +59,18 @@ data class AppSettings(
     val selectedId: String? = null,
     val gps: Place? = null,
 )
+
+/** « Ma position » existe toujours, même avant la première résolution. */
+fun AppSettings.gpsPlace(): Place = gps ?: Place(
+    id = GPS_ID,
+    name = "Ma position",
+    lat = 0.0,
+    lon = 0.0,
+    isGps = true,
+)
+
+/** Ma position puis les favoris : ordre d'affichage et de sélection. */
+fun AppSettings.allPlaces(): List<Place> = listOf(gpsPlace()) + favourites
 
 /** Réponse brute de RainService.php. Les nombres arrivent parfois en chaînes. */
 @Serializable

@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,19 +12,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import net.chevillot.raintoday.data.AlertRule
 import net.chevillot.raintoday.data.AppSettings
+import net.chevillot.raintoday.data.GPS_ID
 import net.chevillot.raintoday.data.MeteogroupApi
 import net.chevillot.raintoday.data.Place
 import net.chevillot.raintoday.data.RainRepository
 import net.chevillot.raintoday.data.RainSeries
 import net.chevillot.raintoday.data.SettingsRepository
+import net.chevillot.raintoday.data.gpsPlace
 import net.chevillot.raintoday.domain.Outlook
 import net.chevillot.raintoday.domain.outlook
+import net.chevillot.raintoday.platform.Fix
 import net.chevillot.raintoday.platform.LocationHelper
 import net.chevillot.raintoday.platform.distanceMeters
 import net.chevillot.raintoday.work.AlertScheduler
+import java.io.IOException
 import java.time.Duration
 import java.time.Instant
 
@@ -63,11 +67,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         AlertScheduler.ensureScheduled(app)
         viewModelScope.launch {
             settingsRepo.flow.collect { settings ->
-                val place = settingsRepo.resolvePlace(settings, settings.selectedId)
-                    ?: settings.gps
-                    ?: settings.favourites.firstOrNull()
+                val place = when (val id = settings.selectedId) {
+                    null -> settings.gps?.takeIf { it.hasCoordinates } ?: settings.favourites.firstOrNull()
+                    GPS_ID -> settings.gpsPlace()
+                    else -> settings.favourites.firstOrNull { it.id == id }
+                        ?: settings.favourites.firstOrNull()
+                }
                 _state.update { it.copy(settings = settings, place = place) }
-                val key = place?.let { "${it.id}|${it.lat}|${it.lon}|${it.areaId}" }
+                val key = keyOf(place)
                 if (place != null && key != loadedKey) {
                     loadedKey = key
                     refresh()
@@ -87,26 +94,60 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         loadJob?.cancel()
         Log.d(TAG, "refresh ${place.name} / zone=${place.areaId}")
         loadJob = viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null, lastAttemptAt = Instant.now()) }
-            runCatching { rainRepo.seriesFor(place) }
-                .onSuccess { series ->
-                    val now = Instant.now()
-                    _state.update {
-                        it.copy(
-                            series = series,
-                            outlook = series.outlook(now),
-                            updatedAt = now,
-                            now = now,
-                            loading = false,
-                            error = null,
-                        )
-                    }
+            _state.update { it.copy(loading = true, locating = place.isGps, error = null, lastAttemptAt = Instant.now()) }
+            try {
+                val target = if (place.isGps) currentPositionPlace(place) else place
+                val series = rainRepo.seriesFor(target)
+                // Mémorisé avant l'écriture pour que le flux de réglages ne
+                // redéclenche pas un second chargement identique.
+                loadedKey = keyOf(target)
+                if (target != place) settingsRepo.saveGpsPlace(target)
+                val now = Instant.now()
+                _state.update {
+                    it.copy(
+                        series = series,
+                        outlook = series.outlook(now),
+                        updatedAt = now,
+                        now = now,
+                        loading = false,
+                        locating = false,
+                        error = null,
+                    )
                 }
-                .onFailure { error ->
-                    _state.update { it.copy(loading = false, error = error.friendlyMessage()) }
-                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                _state.update { it.copy(loading = false, locating = false, error = error.friendlyMessage()) }
+            }
         }
     }
+
+    /**
+     * « Ma position » est résolue à chaque rafraîchissement : dernière position
+     * connue si elle a moins de 10 min, sinon fix borné. Les appels réseau
+     * (nom + zone UWZ) ne sont refaits que si le point a bougé de plus de 250 m.
+     */
+    private suspend fun currentPositionPlace(previous: Place): Place {
+        val known = runCatching { location.lastKnown() }.getOrNull()
+        val fix = when {
+            known == null -> runCatching { location.current(timeoutMs = 7_000L) }.getOrNull()
+            System.currentTimeMillis() - known.timeMillis < GPS_FRESH_MILLIS -> known
+            else -> runCatching { location.current(timeoutMs = 5_000L) }.getOrNull() ?: known
+        }
+
+        if (fix == null) {
+            if (previous.hasCoordinates) return previous
+            throw IOException("Position indisponible : activez la localisation du téléphone")
+        }
+
+        val moved = !previous.hasCoordinates ||
+            distanceMeters(Fix(previous.lat, previous.lon, 0L), fix) > GPS_MOVE_METERS
+        if (!moved && previous.areaId != null) return previous
+        return rainRepo.resolveGps(fix.lat, fix.lon)
+    }
+
+    private fun keyOf(place: Place?): String? =
+        place?.let { "${it.id}|${it.lat}|${it.lon}|${it.areaId}" }
 
     private fun tick() {
         val current = _state.value
@@ -120,48 +161,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (age >= 5 && sinceAttempt >= 2 && !current.loading) refresh()
     }
 
-    /**
-     * Deux temps : la dernière position connue (même ancienne) sert immédiatement
-     * à afficher une prévision, puis une position fraîche, bornée à 7 s, remplace
-     * la première seulement si elle a bougé de plus de 250 m.
-     */
+    /** Sélectionne « Ma position » et force sa résolution (bouton, état vide). */
     fun addGpsPlace() {
-        if (_state.value.locating) return
         viewModelScope.launch {
-            _state.update { it.copy(locating = true, error = null) }
-            var resolved: Place? = null
-
-            val known = runCatching { location.lastKnown() }.getOrNull()
-            if (known != null) {
-                resolved = runCatching { rainRepo.resolveGps(known.lat, known.lon) }.getOrNull()
-                if (resolved != null) {
-                    settingsRepo.saveGpsPlace(resolved)
-                    settingsRepo.selectPlace(SettingsRepository.GPS_ID)
-                }
+            if (_state.value.settings.selectedId == GPS_ID) {
+                refresh()
+            } else {
+                settingsRepo.selectPlace(GPS_ID)
             }
-
-            val fresh = runCatching { location.current(timeoutMs = 7_000L) }.getOrNull()
-            if (fresh != null && (known == null || distanceMeters(known, fresh) > 250.0)) {
-                runCatching { rainRepo.resolveGps(fresh.lat, fresh.lon) }.getOrNull()?.let { place ->
-                    settingsRepo.saveGpsPlace(place)
-                    settingsRepo.selectPlace(SettingsRepository.GPS_ID)
-                    resolved = place
-                }
-            }
-
-            _state.update {
-                it.copy(
-                    locating = false,
-                    error = if (resolved == null) {
-                        "Position indisponible : activez la localisation du téléphone"
-                    } else {
-                        null
-                    },
-                )
-            }
-            // La zone peut être inchangée : on rafraîchit quand même la prévision,
-            // sinon le bouton donnerait l'impression de ne rien faire.
-            if (resolved != null) refresh()
         }
     }
 
@@ -218,5 +225,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         message?.contains("Unable to resolve host") == true -> "Pas de réseau"
         message.isNullOrBlank() -> "Erreur inconnue"
         else -> message!!
+    }
+
+    private companion object {
+        /** En deçà, la dernière position connue est considérée comme courante. */
+        const val GPS_FRESH_MILLIS = 10 * 60_000L
+
+        /** Déplacement en deçà duquel on ne relance pas le géocodage / la zone. */
+        const val GPS_MOVE_METERS = 250.0
     }
 }

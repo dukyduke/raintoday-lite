@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import net.chevillot.raintoday.UiState
 import net.chevillot.raintoday.data.Place
+import net.chevillot.raintoday.data.allPlaces
 
 @Composable
 fun PlacesScreen(
@@ -53,10 +54,7 @@ fun PlacesScreen(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
 
-    val places = buildList {
-        state.settings.gps?.let { add(it) }
-        addAll(state.settings.favourites)
-    }
+    val places = state.settings.allPlaces()
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -84,7 +82,7 @@ fun PlacesScreen(
                     Icon(Icons.Outlined.MyLocation, contentDescription = null)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(if (state.locating) "Recherche de la position…" else "Utiliser ma position GPS")
+                Text(if (state.locating) "Recherche de la position…" else "Actualiser ma position")
             }
         }
 
@@ -156,14 +154,14 @@ fun PlacesScreen(
                     Row(
                         modifier = Modifier
                             .clickable { onSelect(place.id) }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                            .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = selected, onClick = { onSelect(place.id) })
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    place.name,
+                                    if (place.isGps) "Ma position" else place.name,
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                 )
@@ -177,18 +175,37 @@ fun PlacesScreen(
                                     )
                                 }
                             }
-                            val detail = listOf(place.label, place.areaId.orEmpty())
-                                .filter { it.isNotBlank() }
-                                .joinToString(" · ")
-                            if (detail.isNotBlank()) {
-                                Text(
-                                    detail,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            val detail = if (place.isGps) {
+                                listOf(
+                                    if (place.hasCoordinates) place.name else "position du téléphone",
+                                    place.areaId.orEmpty(),
+                                    place.updatedAt.frTime(),
                                 )
-                            }
+                            } else {
+                                listOf(place.label, place.areaId.orEmpty())
+                            }.filter { it.isNotBlank() }.joinToString(" · ")
+                            Text(
+                                detail,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        if (!place.isGps) {
+                        if (place.isGps) {
+                            IconButton(onClick = onAddGps, enabled = !state.locating) {
+                                if (state.locating) {
+                                    CircularProgressIndicator(
+                                        Modifier.width(18.dp).height(18.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Outlined.MyLocation,
+                                        contentDescription = "Actualiser ma position",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                        } else {
                             IconButton(onClick = { onRemovePlace(place.id) }) {
                                 Icon(
                                     Icons.Outlined.Delete,

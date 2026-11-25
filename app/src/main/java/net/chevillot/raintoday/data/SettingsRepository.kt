@@ -80,11 +80,7 @@ class SettingsRepository(private val context: Context) {
 
     fun resolvePlace(settings: AppSettings, placeId: String?): Place? = when {
         placeId == null -> null
-        placeId == GPS_ID -> settings.gps
+        placeId == GPS_ID -> settings.gpsPlace()
         else -> settings.favourites.firstOrNull { it.id == placeId }
-    }
-
-    companion object {
-        const val GPS_ID = "__gps__"
     }
 }

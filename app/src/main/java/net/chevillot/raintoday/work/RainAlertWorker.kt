@@ -4,12 +4,16 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import net.chevillot.raintoday.data.MeteogroupApi
+import net.chevillot.raintoday.data.Place
 import net.chevillot.raintoday.data.RainRepository
 import net.chevillot.raintoday.data.SettingsRepository
 import net.chevillot.raintoday.domain.covers
 import net.chevillot.raintoday.domain.rainBetween
 import net.chevillot.raintoday.domain.windowOn
+import net.chevillot.raintoday.platform.Fix
+import net.chevillot.raintoday.platform.LocationHelper
 import net.chevillot.raintoday.platform.Notifications
+import net.chevillot.raintoday.platform.distanceMeters
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -34,7 +38,10 @@ class RainAlertWorker(
         val zone = ZoneId.systemDefault()
 
         for (rule in state.alerts.filter { it.enabled && it.covers(now, zone) }) {
-            val place = settings.resolvePlace(state, rule.placeId) ?: continue
+            val stored = settings.resolvePlace(state, rule.placeId) ?: continue
+            // Une règle sur « Ma position » doit utiliser la position du moment,
+            // pas celle mémorisée quand la règle a été créée.
+            val place = if (stored.isGps) currentGpsPlace(rain, settings, stored) else stored
             val series = runCatching { rain.seriesFor(place) }.getOrNull() ?: continue
 
             val day = now.atZone(zone).toLocalDate()
@@ -61,6 +68,22 @@ class RainAlertWorker(
 
     private fun net.chevillot.raintoday.data.AlertRule.timeLabel(): String =
         "%02d:%02d–%02d:%02d".format(startMinute / 60, startMinute % 60, endMinute / 60, endMinute % 60)
+
+    /** Position courante pour une alerte « Ma position » (bornée, silencieuse en cas d'échec). */
+    private suspend fun currentGpsPlace(
+        rain: RainRepository,
+        settings: SettingsRepository,
+        previous: Place,
+    ): Place {
+        val helper = LocationHelper(applicationContext)
+        val fix = runCatching { helper.current(timeoutMs = 7_000L) }.getOrNull() ?: return previous
+        val moved = !previous.hasCoordinates ||
+            distanceMeters(Fix(previous.lat, previous.lon, 0L), fix) > 250.0
+        if (!moved && previous.areaId != null) return previous
+        val resolved = runCatching { rain.resolveGps(fix.lat, fix.lon) }.getOrNull() ?: return previous
+        settings.saveGpsPlace(resolved)
+        return resolved
+    }
 
     companion object {
         private const val DEDUPE_MILLIS = 90 * 60_000L

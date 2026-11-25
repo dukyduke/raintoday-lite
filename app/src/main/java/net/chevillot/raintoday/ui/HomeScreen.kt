@@ -105,17 +105,14 @@ private fun HomeContent(
                     RainChart(
                         series = series,
                         now = state.now,
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
+                        modifier = Modifier.fillMaxWidth().height(200.dp),
                     )
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        ChartLabel(TIME_FORMAT.format(series.start))
-                        ChartLabel("maintenant", MaterialTheme.colorScheme.primary)
-                        ChartLabel(TIME_FORMAT.format(series.lastTime))
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Heure locale · 1 point par minute · zone passée grisée",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     Box(
                         modifier = Modifier.fillMaxWidth().height(180.dp),
@@ -232,6 +229,12 @@ private fun LegendCard(state: UiState) {
                 LegendDot(RainColors.moderate, "Modérée")
                 LegendDot(RainColors.heavy, "Forte")
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "Échelle relative du service : le seuil de pluie est à 25 %, « forte » à partir de 75 %.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Spacer(Modifier.height(12.dp))
             val area = state.place?.areaId ?: state.series?.areaId
             Text(
