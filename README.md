@@ -13,7 +13,10 @@ aux services Google Play (localisation via `LocationManager`).
   « maintenant »), statut en une phrase (« Il pleut », « Pluie dans 12 min »,
   « Pas de pluie ») et niveau d'intensité.
 - **Position GPS courante** : bouton « Utiliser ma position », nom du lieu obtenu
-  par géocodage inverse du backend.
+  par géocodage inverse du backend. La dernière position connue sert tout de suite
+  (affichage en ~1 s), une position fraîche la remplace ensuite si elle a bougé de
+  plus de 250 m ; réseau et GPS sont interrogés en parallèle, borne de 7 s.
+- **Tirer vers le bas** sur l'écran pluie pour rafraîchir manuellement.
 - **Lieux favoris** : recherche par nom (résultats du service Meteogroup),
   sélection courante, suppression.
 - **Plages horaires d'alerte** : jours de la semaine + début/fin + prévenance.

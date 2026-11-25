@@ -23,12 +23,14 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -45,6 +47,7 @@ import java.time.format.DateTimeFormatter
 private val ZONE: ZoneId = ZoneId.systemDefault()
 private val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZONE)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     state: UiState,
@@ -58,6 +61,22 @@ fun HomeScreen(
         return
     }
 
+    PullToRefreshBox(
+        isRefreshing = state.loading,
+        onRefresh = onRefresh,
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        HomeContent(state, onRefresh, onDismissError)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeContent(
+    state: UiState,
+    onRefresh: () -> Unit,
+    onDismissError: () -> Unit,
+) {
     val series = state.series
     Column(
         modifier = Modifier
@@ -288,10 +307,14 @@ private fun NoPlaceYet(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onAddGps, enabled = !state.loading) {
-            Icon(Icons.Outlined.MyLocation, contentDescription = null)
+        Button(onClick = onAddGps, enabled = !state.loading && !state.locating) {
+            if (state.locating) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(Icons.Outlined.MyLocation, contentDescription = null)
+            }
             Spacer(Modifier.width(8.dp))
-            Text("Utiliser ma position")
+            Text(if (state.locating) "Recherche de la position…" else "Utiliser ma position")
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = onGoToPlaces) {

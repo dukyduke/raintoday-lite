@@ -1,6 +1,7 @@
 package net.chevillot.raintoday
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -21,6 +22,7 @@ import net.chevillot.raintoday.data.SettingsRepository
 import net.chevillot.raintoday.domain.Outlook
 import net.chevillot.raintoday.domain.outlook
 import net.chevillot.raintoday.platform.LocationHelper
+import net.chevillot.raintoday.platform.distanceMeters
 import net.chevillot.raintoday.work.AlertScheduler
 import java.time.Duration
 import java.time.Instant
@@ -31,6 +33,7 @@ data class UiState(
     val series: RainSeries? = null,
     val outlook: Outlook? = null,
     val loading: Boolean = false,
+    val locating: Boolean = false,
     val error: String? = null,
     val now: Instant = Instant.now(),
     val updatedAt: Instant? = null,
@@ -38,6 +41,8 @@ data class UiState(
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val TAG = "RainTodayLite"
 
     private val settingsRepo = SettingsRepository(app)
     private val api = MeteogroupApi()
@@ -80,6 +85,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         val place = _state.value.place ?: return
         loadJob?.cancel()
+        Log.d(TAG, "refresh ${place.name} / zone=${place.areaId}")
         loadJob = viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null, lastAttemptAt = Instant.now()) }
             runCatching { rainRepo.seriesFor(place) }
@@ -114,25 +120,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (age >= 5 && sinceAttempt >= 2 && !current.loading) refresh()
     }
 
+    /**
+     * Deux temps : la dernière position connue (même ancienne) sert immédiatement
+     * à afficher une prévision, puis une position fraîche, bornée à 7 s, remplace
+     * la première seulement si elle a bougé de plus de 250 m.
+     */
     fun addGpsPlace() {
+        if (_state.value.locating) return
         viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null) }
-            val fix = withTimeoutOrNull(25_000L) { location.current() }
-            if (fix == null) {
-                _state.update {
-                    it.copy(loading = false, error = "Position indisponible : activez la localisation du téléphone")
+            _state.update { it.copy(locating = true, error = null) }
+            var resolved: Place? = null
+
+            val known = runCatching { location.lastKnown() }.getOrNull()
+            if (known != null) {
+                resolved = runCatching { rainRepo.resolveGps(known.lat, known.lon) }.getOrNull()
+                if (resolved != null) {
+                    settingsRepo.saveGpsPlace(resolved)
+                    settingsRepo.selectPlace(SettingsRepository.GPS_ID)
                 }
-                return@launch
             }
-            runCatching { rainRepo.resolveGps(fix.latitude, fix.longitude) }
-                .onSuccess { place ->
+
+            val fresh = runCatching { location.current(timeoutMs = 7_000L) }.getOrNull()
+            if (fresh != null && (known == null || distanceMeters(known, fresh) > 250.0)) {
+                runCatching { rainRepo.resolveGps(fresh.lat, fresh.lon) }.getOrNull()?.let { place ->
                     settingsRepo.saveGpsPlace(place)
                     settingsRepo.selectPlace(SettingsRepository.GPS_ID)
-                    _state.update { it.copy(loading = false) }
+                    resolved = place
                 }
-                .onFailure { error ->
-                    _state.update { it.copy(loading = false, error = error.friendlyMessage()) }
-                }
+            }
+
+            _state.update {
+                it.copy(
+                    locating = false,
+                    error = if (resolved == null) {
+                        "Position indisponible : activez la localisation du téléphone"
+                    } else {
+                        null
+                    },
+                )
+            }
+            // La zone peut être inchangée : on rafraîchit quand même la prévision,
+            // sinon le bouton donnerait l'impression de ne rien faire.
+            if (resolved != null) refresh()
         }
     }
 

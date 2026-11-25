@@ -77,10 +77,14 @@ fun PlacesScreen(
                 },
             )
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = onAddGps, enabled = !state.loading) {
-                Icon(Icons.Outlined.MyLocation, contentDescription = null)
+            OutlinedButton(onClick = onAddGps, enabled = !state.loading && !state.locating) {
+                if (state.locating) {
+                    CircularProgressIndicator(Modifier.width(18.dp).height(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Outlined.MyLocation, contentDescription = null)
+                }
                 Spacer(Modifier.width(8.dp))
-                Text("Utiliser ma position GPS")
+                Text(if (state.locating) "Recherche de la position…" else "Utiliser ma position GPS")
             }
         }
 
